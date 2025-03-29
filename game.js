@@ -5,13 +5,14 @@ const GRID_SIZE = 20;
 const CELL_SIZE = 1;
 const MOVE_INTERVAL = 150; // milliseconds
 const COLORS = {
-    background: 0x000000,
+    background: 0x111111,
     grid: 0x222222,
     snake: 0x00ff00,
     snakeHead: 0x00dd00, // Slightly darker green for head
-    food: 0xff0000,
+    food: 0xff3333,
     gridLines: 0x333333,
-    appleStalk: 0x663300
+    appleStalk: 0x663300,
+    gridGlow: 0x00ff00
 };
 
 // Game variables
@@ -26,6 +27,8 @@ let lastMoveTime = 0;
 let gamePaused = false;
 let speedMultiplier = 1;
 let isMoving = true; // Flag to track if the snake is moving
+let gridLines;
+let particleSystem;
 
 // Initialize the game
 function init() {
@@ -46,6 +49,7 @@ function init() {
         // Create Three.js scene
         scene = new THREE.Scene();
         scene.background = new THREE.Color(COLORS.background);
+        scene.fog = new THREE.FogExp2(COLORS.background, 0.035);
         console.log("Scene created");
         
         // Camera setup
@@ -55,19 +59,15 @@ function init() {
         console.log("Camera setup complete");
         
         // Renderer setup
-        renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
         renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
         document.body.appendChild(renderer.domElement);
         console.log("Renderer setup complete");
         
         // Add lights
-        const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
-        scene.add(ambientLight);
-        
-        const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
-        directionalLight.position.set(GRID_SIZE, GRID_SIZE, GRID_SIZE);
-        scene.add(directionalLight);
-        console.log("Lights added");
+        addLighting();
         
         // Create game grid
         createGrid();
@@ -77,6 +77,9 @@ function init() {
         
         // Create initial food (apple)
         spawnFood();
+        
+        // Add particle effects
+        createParticleSystem();
         
         // Set up event listeners
         window.addEventListener('keydown', handleKeyDown);
@@ -91,6 +94,82 @@ function init() {
     } catch (error) {
         console.error("Error initializing game:", error);
     }
+}
+
+// Add lighting to the scene
+function addLighting() {
+    // Ambient light
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
+    scene.add(ambientLight);
+    
+    // Directional light (main light)
+    const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+    directionalLight.position.set(GRID_SIZE, GRID_SIZE, GRID_SIZE);
+    directionalLight.castShadow = true;
+    directionalLight.shadow.mapSize.width = 1024;
+    directionalLight.shadow.mapSize.height = 1024;
+    directionalLight.shadow.camera.near = 0.5;
+    directionalLight.shadow.camera.far = 50;
+    scene.add(directionalLight);
+    
+    // Add a green point light at the snake head position
+    const headLight = new THREE.PointLight(0x00ff00, 1, 10);
+    headLight.position.set(GRID_SIZE / 4, 1, GRID_SIZE / 2);
+    scene.add(headLight);
+    
+    console.log("Lights added");
+}
+
+// Create particle system for visual effects
+function createParticleSystem() {
+    const particleCount = 500;
+    const particles = new THREE.BufferGeometry();
+    const positions = new Float32Array(particleCount * 3);
+    
+    for (let i = 0; i < particleCount * 3; i += 3) {
+        positions[i] = Math.random() * GRID_SIZE * 2 - GRID_SIZE;
+        positions[i + 1] = Math.random() * GRID_SIZE / 2;
+        positions[i + 2] = Math.random() * GRID_SIZE * 2 - GRID_SIZE;
+    }
+    
+    particles.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    
+    const particleMaterial = new THREE.PointsMaterial({
+        color: 0x00ff00,
+        size: 0.05,
+        transparent: true,
+        opacity: 0.5,
+        map: createCircleTexture('#00ff00', 256),
+        blending: THREE.AdditiveBlending,
+        depthWrite: false
+    });
+    
+    particleSystem = new THREE.Points(particles, particleMaterial);
+    scene.add(particleSystem);
+}
+
+// Create a circular texture for particles
+function createCircleTexture(color, size) {
+    const canvas = document.createElement('canvas');
+    canvas.width = size;
+    canvas.height = size;
+    const context = canvas.getContext('2d');
+    
+    // Draw outer glow
+    const gradient = context.createRadialGradient(
+        size / 2, size / 2, 0,
+        size / 2, size / 2, size / 2
+    );
+    gradient.addColorStop(0, color);
+    gradient.addColorStop(0.5, color);
+    gradient.addColorStop(1, 'rgba(0,0,0,0)');
+    
+    context.fillStyle = gradient;
+    context.fillRect(0, 0, size, size);
+    
+    const texture = new THREE.Texture(canvas);
+    texture.needsUpdate = true;
+    return texture;
 }
 
 // Create the initial snake
@@ -121,43 +200,75 @@ function createInitialSnake() {
 
 // Create the grid
 function createGrid() {
+    // Create the main grid plane
     const gridGeometry = new THREE.PlaneGeometry(GRID_SIZE * CELL_SIZE, GRID_SIZE * CELL_SIZE);
-    const gridMaterial = new THREE.MeshBasicMaterial({ 
+    const gridMaterial = new THREE.MeshStandardMaterial({ 
         color: COLORS.grid,
-        side: THREE.DoubleSide
+        side: THREE.DoubleSide,
+        roughness: 0.8,
+        metalness: 0.2
     });
     const grid = new THREE.Mesh(gridGeometry, gridMaterial);
     grid.rotation.x = Math.PI / 2;
     grid.position.set(GRID_SIZE / 2 - 0.5, 0, GRID_SIZE / 2 - 0.5);
+    grid.receiveShadow = true;
     scene.add(grid);
     
-    // Add grid lines
-    const gridHelper = new THREE.GridHelper(GRID_SIZE, GRID_SIZE, COLORS.gridLines, COLORS.gridLines);
-    gridHelper.position.set(GRID_SIZE / 2 - 0.5, 0.01, GRID_SIZE / 2 - 0.5);
-    scene.add(gridHelper);
+    // Add grid lines with glow effect
+    gridLines = new THREE.GridHelper(GRID_SIZE, GRID_SIZE, COLORS.gridGlow, COLORS.gridLines);
+    gridLines.position.set(GRID_SIZE / 2 - 0.5, 0.01, GRID_SIZE / 2 - 0.5);
+    scene.add(gridLines);
+    
+    // Add a subtle glow around the grid edges
+    addGridGlow();
+    
     console.log("Grid created");
+}
+
+// Add a glowing border to the grid
+function addGridGlow() {
+    const edgeGeometry = new THREE.EdgesGeometry(
+        new THREE.BoxGeometry(GRID_SIZE, 0.1, GRID_SIZE)
+    );
+    const edgeMaterial = new THREE.LineBasicMaterial({ 
+        color: COLORS.gridGlow,
+        transparent: true,
+        opacity: 0.6
+    });
+    const edges = new THREE.LineSegments(edgeGeometry, edgeMaterial);
+    edges.position.set(GRID_SIZE / 2 - 0.5, 0, GRID_SIZE / 2 - 0.5);
+    scene.add(edges);
 }
 
 // Add a snake segment at the specified position
 function addSnakeSegment(x, y, z, isHead = false) {
+    // Create segment geometry with rounded corners
     const geometry = new THREE.BoxGeometry(CELL_SIZE * 0.9, CELL_SIZE * 0.9, CELL_SIZE * 0.9);
-    const material = new THREE.MeshLambertMaterial({ 
-        color: isHead ? COLORS.snakeHead : COLORS.snake 
+    
+    // Special material for head and body
+    const material = new THREE.MeshStandardMaterial({ 
+        color: isHead ? COLORS.snakeHead : COLORS.snake,
+        emissive: isHead ? COLORS.snakeHead : COLORS.snake,
+        emissiveIntensity: isHead ? 0.5 : 0.3,
+        roughness: 0.3,
+        metalness: 0.7
     });
+    
     const segment = new THREE.Mesh(geometry, material);
     segment.position.set(x, y, z);
+    segment.castShadow = true;
     
     // If it's the head, add eyes
     if (isHead) {
         // Left eye
-        const leftEyeGeometry = new THREE.SphereGeometry(0.1, 8, 8);
+        const leftEyeGeometry = new THREE.SphereGeometry(0.1, 12, 12);
         const eyeMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff });
         const leftEye = new THREE.Mesh(leftEyeGeometry, eyeMaterial);
         leftEye.position.set(0.2, 0.2, -0.3);
         segment.add(leftEye);
         
         // Left pupil
-        const leftPupilGeometry = new THREE.SphereGeometry(0.05, 8, 8);
+        const leftPupilGeometry = new THREE.SphereGeometry(0.05, 12, 12);
         const pupilMaterial = new THREE.MeshBasicMaterial({ color: 0x000000 });
         const leftPupil = new THREE.Mesh(leftPupilGeometry, pupilMaterial);
         leftPupil.position.set(0, 0, -0.06);
@@ -207,24 +318,44 @@ function spawnFood() {
     
     // Apple body (red sphere)
     const appleGeometry = new THREE.SphereGeometry(CELL_SIZE / 2, 16, 16);
-    const appleMaterial = new THREE.MeshLambertMaterial({ color: COLORS.food });
+    const appleMaterial = new THREE.MeshStandardMaterial({ 
+        color: COLORS.food,
+        roughness: 0.3,
+        metalness: 0.2,
+        emissive: COLORS.food,
+        emissiveIntensity: 0.2
+    });
     const apple = new THREE.Mesh(appleGeometry, appleMaterial);
+    apple.castShadow = true;
     food.add(apple);
     
     // Apple stalk
     const stalkGeometry = new THREE.CylinderGeometry(0.05, 0.05, 0.3, 8);
-    const stalkMaterial = new THREE.MeshLambertMaterial({ color: COLORS.appleStalk });
+    const stalkMaterial = new THREE.MeshStandardMaterial({ 
+        color: COLORS.appleStalk,
+        roughness: 0.7
+    });
     const stalk = new THREE.Mesh(stalkGeometry, stalkMaterial);
     stalk.position.set(0, 0.4, 0);
+    stalk.castShadow = true;
     food.add(stalk);
     
     // Add a leaf
     const leafGeometry = new THREE.BoxGeometry(0.2, 0.05, 0.2);
-    const leafMaterial = new THREE.MeshLambertMaterial({ color: 0x00AA00 });
+    const leafMaterial = new THREE.MeshStandardMaterial({ 
+        color: 0x00AA00,
+        roughness: 0.7 
+    });
     const leaf = new THREE.Mesh(leafGeometry, leafMaterial);
     leaf.position.set(0.15, 0.4, 0);
     leaf.rotation.z = Math.PI / 6;
+    leaf.castShadow = true;
     food.add(leaf);
+    
+    // Add point light to the food to make it glow
+    const foodLight = new THREE.PointLight(COLORS.food, 1, 3);
+    foodLight.position.set(0, 0, 0);
+    food.add(foodLight);
     
     food.position.set(foodPosition.x, foodPosition.y, foodPosition.z);
     scene.add(food);
@@ -414,12 +545,142 @@ function endGame() {
     document.getElementById('final-score').textContent = `Final Score: ${score}`;
     document.getElementById('game-over').style.display = 'block';
     console.log("Game over! Final score:", score);
+    
+    // Add particle explosion effect
+    createExplosionEffect(snake[0].position);
+}
+
+// Create explosion effect when game over
+function createExplosionEffect(position) {
+    const particleCount = 100;
+    const explosionGeometry = new THREE.BufferGeometry();
+    const particlePositions = new Float32Array(particleCount * 3);
+    const particleVelocities = [];
+    
+    for (let i = 0; i < particleCount * 3; i += 3) {
+        particlePositions[i] = position.x;
+        particlePositions[i + 1] = position.y;
+        particlePositions[i + 2] = position.z;
+        
+        particleVelocities.push({
+            x: (Math.random() - 0.5) * 0.3,
+            y: Math.random() * 0.2,
+            z: (Math.random() - 0.5) * 0.3
+        });
+    }
+    
+    explosionGeometry.setAttribute('position', new THREE.BufferAttribute(particlePositions, 3));
+    
+    const explosionMaterial = new THREE.PointsMaterial({
+        color: 0xff0000,
+        size: 0.2,
+        transparent: true,
+        opacity: 1,
+        map: createCircleTexture('#ff0000', 256),
+        blending: THREE.AdditiveBlending,
+        depthWrite: false
+    });
+    
+    const explosionParticles = new THREE.Points(explosionGeometry, explosionMaterial);
+    scene.add(explosionParticles);
+    
+    // Animate explosion
+    const animateExplosion = function(time) {
+        if (gameOver) {
+            const positions = explosionGeometry.attributes.position.array;
+            
+            for (let i = 0, j = 0; i < particleCount * 3; i += 3, j++) {
+                positions[i] += particleVelocities[j].x;
+                positions[i + 1] += particleVelocities[j].y;
+                positions[i + 2] += particleVelocities[j].z;
+                
+                // Apply gravity
+                particleVelocities[j].y -= 0.01;
+            }
+            
+            explosionGeometry.attributes.position.needsUpdate = true;
+            explosionMaterial.opacity -= 0.005;
+            
+            if (explosionMaterial.opacity <= 0) {
+                scene.remove(explosionParticles);
+            } else {
+                requestAnimationFrame(animateExplosion);
+            }
+        }
+    };
+    
+    animateExplosion();
 }
 
 // Update score
 function updateScore(points) {
     score += points;
     document.getElementById('score').textContent = `Score: ${score}`;
+    
+    // Create score pop-up effect
+    createScorePopup(points);
+}
+
+// Create a floating score popup
+function createScorePopup(points) {
+    // Create a score popup in the DOM
+    const popup = document.createElement('div');
+    popup.innerHTML = `+${points}`;
+    popup.style.position = 'absolute';
+    popup.style.color = '#00ff00';
+    popup.style.fontFamily = "'Press Start 2P', cursive";
+    popup.style.fontSize = '20px';
+    popup.style.fontWeight = 'bold';
+    popup.style.textShadow = '0 0 5px #00ff00';
+    popup.style.zIndex = '1000';
+    
+    // Position near the food
+    const foodScreenPosition = toScreenPosition(food);
+    popup.style.left = `${foodScreenPosition.x}px`;
+    popup.style.top = `${foodScreenPosition.y}px`;
+    
+    // Add to DOM
+    document.body.appendChild(popup);
+    
+    // Animate and remove
+    let opacity = 1;
+    let posY = foodScreenPosition.y;
+    
+    const animatePopup = function() {
+        opacity -= 0.02;
+        posY -= 1;
+        
+        popup.style.opacity = opacity;
+        popup.style.top = `${posY}px`;
+        
+        if (opacity > 0) {
+            requestAnimationFrame(animatePopup);
+        } else {
+            document.body.removeChild(popup);
+        }
+    };
+    
+    animatePopup();
+}
+
+// Convert 3D position to screen coordinates
+function toScreenPosition(obj) {
+    const vector = new THREE.Vector3();
+    
+    // Get world position
+    vector.setFromMatrixPosition(obj.matrixWorld);
+    
+    // Project to screen
+    vector.project(camera);
+    
+    // Convert to screen coordinates
+    const widthHalf = window.innerWidth / 2;
+    const heightHalf = window.innerHeight / 2;
+    
+    return {
+        x: (vector.x * widthHalf) + widthHalf,
+        y: -(vector.y * heightHalf) + heightHalf
+    };
 }
 
 // Handle window resize
@@ -525,6 +786,24 @@ function animate(time) {
     if (food) {
         food.rotation.y += 0.02;
         food.position.y = 0.5 + Math.sin(time * 0.003) * 0.2; // Floating effect
+    }
+    
+    // Animate grid lines
+    if (gridLines) {
+        gridLines.material.color.r = Math.sin(time * 0.001) * 0.2 + 0.3;
+        gridLines.material.color.g = Math.sin(time * 0.001) * 0.2 + 0.7;
+    }
+    
+    // Animate particles
+    if (particleSystem) {
+        const positions = particleSystem.geometry.attributes.position.array;
+        
+        for (let i = 0; i < positions.length; i += 3) {
+            positions[i + 1] = Math.sin((time + i) * 0.001) * 0.2 + 0.5;
+        }
+        
+        particleSystem.geometry.attributes.position.needsUpdate = true;
+        particleSystem.rotation.y += 0.0005;
     }
     
     renderer.render(scene, camera);
