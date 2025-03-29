@@ -8,6 +8,7 @@ const COLORS = {
     background: 0x000000,
     grid: 0x222222,
     snake: 0x00ff00,
+    snakeHead: 0x00dd00, // Slightly darker green for head
     food: 0xff0000,
     gridLines: 0x333333,
     appleStalk: 0x663300
@@ -24,6 +25,7 @@ let gameOver = false;
 let lastMoveTime = 0;
 let gamePaused = false;
 let speedMultiplier = 1;
+let moveRequested = false;
 
 // Initialize the game
 function init() {
@@ -71,12 +73,7 @@ function init() {
         createGrid();
         
         // Create initial snake (3 segments)
-        const startX = Math.floor(GRID_SIZE / 4);
-        const startY = Math.floor(GRID_SIZE / 2);
-        for (let i = 0; i < 3; i++) {
-            addSnakeSegment(startX - i, startY, 0);
-        }
-        console.log("Snake created with", snake.length, "segments");
+        createInitialSnake();
         
         // Create initial food (apple)
         spawnFood();
@@ -94,6 +91,32 @@ function init() {
     } catch (error) {
         console.error("Error initializing game:", error);
     }
+}
+
+// Create the initial snake
+function createInitialSnake() {
+    // Clear any existing snake
+    while (snake.length > 0) {
+        const segment = snake.pop();
+        if (segment.mesh) {
+            scene.remove(segment.mesh);
+        }
+    }
+    
+    // Create initial snake (3 segments)
+    const startX = Math.floor(GRID_SIZE / 4);
+    const startY = 0.5; // Slightly above the grid
+    const startZ = Math.floor(GRID_SIZE / 2);
+    
+    // Add head
+    addSnakeSegment(startX, startY, startZ, true);
+    
+    // Add body segments
+    for (let i = 1; i < 3; i++) {
+        addSnakeSegment(startX - i, startY, startZ, false);
+    }
+    
+    console.log("Snake created with", snake.length, "segments at position:", startX, startY, startZ);
 }
 
 // Create the grid
@@ -116,13 +139,51 @@ function createGrid() {
 }
 
 // Add a snake segment at the specified position
-function addSnakeSegment(x, y, z) {
-    const geometry = new THREE.BoxGeometry(CELL_SIZE, CELL_SIZE, CELL_SIZE);
-    const material = new THREE.MeshLambertMaterial({ color: COLORS.snake });
+function addSnakeSegment(x, y, z, isHead = false) {
+    const geometry = new THREE.BoxGeometry(CELL_SIZE * 0.9, CELL_SIZE * 0.9, CELL_SIZE * 0.9);
+    const material = new THREE.MeshLambertMaterial({ 
+        color: isHead ? COLORS.snakeHead : COLORS.snake 
+    });
     const segment = new THREE.Mesh(geometry, material);
     segment.position.set(x, y, z);
+    
+    // If it's the head, add eyes
+    if (isHead) {
+        // Left eye
+        const leftEyeGeometry = new THREE.SphereGeometry(0.1, 8, 8);
+        const eyeMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff });
+        const leftEye = new THREE.Mesh(leftEyeGeometry, eyeMaterial);
+        leftEye.position.set(0.2, 0.2, -0.3);
+        segment.add(leftEye);
+        
+        // Left pupil
+        const leftPupilGeometry = new THREE.SphereGeometry(0.05, 8, 8);
+        const pupilMaterial = new THREE.MeshBasicMaterial({ color: 0x000000 });
+        const leftPupil = new THREE.Mesh(leftPupilGeometry, pupilMaterial);
+        leftPupil.position.set(0, 0, -0.06);
+        leftEye.add(leftPupil);
+        
+        // Right eye
+        const rightEye = new THREE.Mesh(leftEyeGeometry, eyeMaterial);
+        rightEye.position.set(0.2, 0.2, 0.3);
+        segment.add(rightEye);
+        
+        // Right pupil
+        const rightPupil = new THREE.Mesh(leftPupilGeometry, pupilMaterial);
+        rightPupil.position.set(0, 0, -0.06);
+        rightEye.add(rightPupil);
+    }
+    
     scene.add(segment);
-    snake.unshift({ mesh: segment, position: { x, y, z } });
+    snake.unshift({ 
+        mesh: segment, 
+        position: { x, y, z },
+        isHead: isHead
+    });
+    
+    if (isHead) {
+        console.log("Added snake head at", x, y, z);
+    }
 }
 
 // Spawn food (apple) at a random position not occupied by the snake
@@ -184,7 +245,9 @@ function handleKeyDown(event) {
     if (event.key === 'p' || event.key === ' ') {
         gamePaused = !gamePaused;
         const pauseElement = document.getElementById('pause-indicator');
-        pauseElement.style.display = gamePaused ? 'block' : 'none';
+        if (pauseElement) {
+            pauseElement.style.display = gamePaused ? 'block' : 'none';
+        }
         return;
     }
     
@@ -197,31 +260,46 @@ function handleKeyDown(event) {
     // Only process direction keys if game is running
     if (gameOver || gamePaused) return;
     
+    let directionChanged = false;
+    
     switch (event.key) {
         case 'ArrowUp':
         case 'w':
+        case 'W':
             if (direction.z !== 1) { // Not moving backward
                 newDirection = { x: 0, y: 0, z: -1 };
+                directionChanged = true;
             }
             break;
         case 'ArrowDown':
         case 's':
+        case 'S':
             if (direction.z !== -1) { // Not moving forward
                 newDirection = { x: 0, y: 0, z: 1 };
+                directionChanged = true;
             }
             break;
         case 'ArrowLeft':
         case 'a':
+        case 'A':
             if (direction.x !== 1) { // Not moving right
                 newDirection = { x: -1, y: 0, z: 0 };
+                directionChanged = true;
             }
             break;
         case 'ArrowRight':
         case 'd':
+        case 'D':
             if (direction.x !== -1) { // Not moving left
                 newDirection = { x: 1, y: 0, z: 0 };
+                directionChanged = true;
             }
             break;
+    }
+    
+    if (directionChanged) {
+        console.log("Direction changed to:", newDirection);
+        moveRequested = true;
     }
 }
 
@@ -230,45 +308,77 @@ function moveSnake() {
     if (gameOver || gamePaused) return;
     
     // Update direction
-    direction = newDirection;
+    direction = { ...newDirection };
     
     // Calculate new head position
     const head = snake[0];
     const newHeadPos = {
         x: head.position.x + direction.x,
-        y: head.position.y + direction.y,
+        y: head.position.y,
         z: head.position.z + direction.z
     };
+    
+    console.log("Moving snake to:", newHeadPos);
     
     // Check for collision with wall
     if (
         newHeadPos.x < 0 || newHeadPos.x >= GRID_SIZE ||
         newHeadPos.z < 0 || newHeadPos.z >= GRID_SIZE
     ) {
+        console.log("Wall collision detected!");
         endGame();
         return;
     }
     
-    // Check for collision with self
-    if (snake.length > 1 && isPositionOccupied(newHeadPos)) {
-        endGame();
-        return;
+    // Check for collision with self (skip the last segment as it will be removed)
+    for (let i = 0; i < snake.length - 1; i++) {
+        const segment = snake[i];
+        if (
+            Math.round(newHeadPos.x) === Math.round(segment.position.x) &&
+            Math.round(newHeadPos.z) === Math.round(segment.position.z)
+        ) {
+            console.log("Self collision detected!");
+            endGame();
+            return;
+        }
     }
     
-    // Add new head
-    addSnakeSegment(newHeadPos.x, newHeadPos.y, newHeadPos.z);
-    
-    // Check for food collision
-    if (
+    // Food collision detection
+    let ateFood = false;
+    if (food && 
         Math.round(newHeadPos.x) === Math.round(food.position.x) &&
         Math.round(newHeadPos.z) === Math.round(food.position.z)
     ) {
-        // Eat food, don't remove tail
+        ateFood = true;
+        // Don't remove tail on food consumption
+    }
+    
+    // Update head orientation based on direction
+    updateSnakeHeadOrientation();
+    
+    // Add new head
+    addSnakeSegment(newHeadPos.x, newHeadPos.y, newHeadPos.z, true);
+    
+    // Update the second segment (previous head) to be a body segment
+    if (snake.length > 1) {
+        const formerHead = snake[1];
+        if (formerHead.isHead) {
+            // Remove the eyes from the former head
+            while (formerHead.mesh.children.length > 0) {
+                formerHead.mesh.remove(formerHead.mesh.children[0]);
+            }
+            formerHead.mesh.material.color.set(COLORS.snake);
+            formerHead.isHead = false;
+        }
+    }
+    
+    if (ateFood) {
+        // Eat food
         spawnFood();
         updateScore(10);
         
         // Increase game speed as score increases
-        if (score % 50 === 0) {
+        if (score % 50 === 0 && score > 0) {
             speedMultiplier += 0.1;
             console.log("Speed increased to", speedMultiplier);
         }
@@ -276,6 +386,30 @@ function moveSnake() {
         // Remove tail
         const tail = snake.pop();
         scene.remove(tail.mesh);
+    }
+    
+    moveRequested = false;
+}
+
+// Update the orientation of the snake head based on direction
+function updateSnakeHeadOrientation() {
+    if (snake.length > 0) {
+        const head = snake[0];
+        if (head && head.mesh) {
+            // Reset rotation
+            head.mesh.rotation.set(0, 0, 0);
+            
+            // Rotate based on direction
+            if (direction.x === 1) { // Moving right
+                head.mesh.rotation.y = 0;
+            } else if (direction.x === -1) { // Moving left
+                head.mesh.rotation.y = Math.PI;
+            } else if (direction.z === 1) { // Moving down
+                head.mesh.rotation.y = Math.PI / 2;
+            } else if (direction.z === -1) { // Moving up
+                head.mesh.rotation.y = -Math.PI / 2;
+            }
+        }
     }
 }
 
@@ -385,7 +519,7 @@ function animate(time) {
     
     // Move snake at interval (affected by speed multiplier)
     const adjustedInterval = MOVE_INTERVAL / speedMultiplier;
-    if (time - lastMoveTime > adjustedInterval && !gameOver && !gamePaused) {
+    if ((time - lastMoveTime > adjustedInterval || moveRequested) && !gameOver && !gamePaused) {
         moveSnake();
         lastMoveTime = time;
     }
