@@ -25,7 +25,7 @@ let gameOver = false;
 let lastMoveTime = 0;
 let gamePaused = false;
 let speedMultiplier = 1;
-let moveRequested = false;
+let isMoving = true; // Flag to track if the snake is moving
 
 // Initialize the game
 function init() {
@@ -299,16 +299,16 @@ function handleKeyDown(event) {
     
     if (directionChanged) {
         console.log("Direction changed to:", newDirection);
-        moveRequested = true;
+        
+        // Apply the head orientation immediately when direction changes
+        direction = { ...newDirection };
+        updateSnakeHeadOrientation();
     }
 }
 
 // Update snake position
 function moveSnake() {
     if (gameOver || gamePaused) return;
-    
-    // Update direction
-    direction = { ...newDirection };
     
     // Calculate new head position
     const head = snake[0];
@@ -353,9 +353,6 @@ function moveSnake() {
         // Don't remove tail on food consumption
     }
     
-    // Update head orientation based on direction
-    updateSnakeHeadOrientation();
-    
     // Add new head
     addSnakeSegment(newHeadPos.x, newHeadPos.y, newHeadPos.z, true);
     
@@ -387,8 +384,6 @@ function moveSnake() {
         const tail = snake.pop();
         scene.remove(tail.mesh);
     }
-    
-    moveRequested = false;
 }
 
 // Update the orientation of the snake head based on direction
@@ -519,7 +514,9 @@ function animate(time) {
     
     // Move snake at interval (affected by speed multiplier)
     const adjustedInterval = MOVE_INTERVAL / speedMultiplier;
-    if ((time - lastMoveTime > adjustedInterval || moveRequested) && !gameOver && !gamePaused) {
+    
+    // Always move in the current direction unless paused or game over
+    if ((time - lastMoveTime > adjustedInterval) && !gameOver && !gamePaused) {
         moveSnake();
         lastMoveTime = time;
     }
